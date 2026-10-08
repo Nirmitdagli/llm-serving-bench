@@ -1,0 +1,6 @@
+aiohttp>=3.9
+transformers>=4.40   # exact input lengths via the model tokenizer
+matplotlib            # report plot (optional)
+pytest                 # tests
+# Engines are installed separately, one environment each (see README):
+#   vllm, sglang[all], tensorrt-llm (NGC container)
