@@ -46,9 +46,63 @@ still counted exactly.
   are not counted.
 - **Greedy decoding** (`temperature: 0`) on all engines.
 
-## Results
+## Results (Tesla T4, 16 GB)
 
-Tables from `report.py` are added here after each GPU run, with the GPU name and engine versions.
+Colab T4, driver 580.82, vLLM 0.31.0, SGLang 0.5.21. Qwen2.5-1.5B-Instruct in fp16 and its
+AWQ 4-bit version. 512 input / 128 output tokens, 128 requests per level, memory fraction 0.85,
+greedy decoding. Every run completed 128/128 requests. Both engines ran Triton attention
+kernels on the T4 (vLLM picked `TRITON_ATTN` itself; SGLang was started with `--attention-backend triton`).
+
+**Summary**
+
+- **vLLM led SGLang on this GPU at every load level.** At 64 users: 609 vs 384 output tok/s
+  (fp16). Single-user decode speed was the same (20 ms per token), but SGLang's first token
+  took about 2x longer and its throughput scaled less with batch size. Both used Triton
+  attention, so the gap is elsewhere in the engine; I have not profiled it yet.
+- **Continuous batching:** going from 1 to 64 concurrent users raised vLLM's total throughput
+  12x (51 to 609 tok/s) while per-user decode slowed from 20 to 92 ms per token.
+- **4-bit AWQ helps most at low load.** vLLM decode went from 20.0 to 8.5 ms per token (2.3x)
+  for one user, because decode is memory-bandwidth bound and the weights shrink from 3.03 GB
+  to 1.11 GB. At 64 users the gain is only 5% (609 to 637 tok/s): the weights are read once
+  per step for the whole batch, so attention and KV-cache traffic dominate.
+- Smaller weights also leave more room for KV cache: SGLang allocated 417K tokens of KV cache
+  with AWQ vs 346K with fp16.
+- **Quantized kernels matter as much as the format.** SGLang's AWQ run was slower than its
+  fp16 run on the T4 (35.7 vs 20.1 ms per token for one user), while vLLM's AWQ run was 2.3x
+  faster. Same checkpoint, same GPU: the gain depends on each engine's int4 kernels for that
+  architecture.
+
+**fp16**
+
+| Users | Engine | Req/s | Output tok/s | TTFT p50 ms | TPOT p50 ms | GPU peak MiB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | vLLM | 0.40 | 51 | 132.8 | 19.96 | 12,487 |
+| 1 | SGLang | 0.35 | 45 | 255.6 | 20.07 | 13,399 |
+| 4 | vLLM | 1.49 | 190 | 448.3 | 17.67 | 12,487 |
+| 4 | SGLang | 1.28 | 164 | 683.4 | 19.15 | 13,399 |
+| 16 | vLLM | 3.31 | 424 | 998.3 | 30.13 | 12,557 |
+| 16 | SGLang | 1.98 | 253 | 2,037.3 | 44.94 | 13,421 |
+| 64 | vLLM | 4.76 | 609 | 1,789.5 | 92.08 | 12,557 |
+| 64 | SGLang | 3.00 | 384 | 7,417.1 | 108.54 | 13,497 |
+
+**AWQ int4**
+
+| Users | Engine | Req/s | Output tok/s | TTFT p50 ms | TPOT p50 ms | GPU peak MiB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | vLLM | 0.82 | 106 | 132.0 | 8.51 | 12,553 |
+| 1 | SGLang | 0.21 | 27 | 277.0 | 35.68 | 13,437 |
+| 4 | vLLM | 2.41 | 308 | 472.8 | 9.36 | 12,553 |
+| 4 | SGLang | 0.78 | 100 | 930.3 | 32.97 | 13,437 |
+| 16 | vLLM | 4.18 | 535 | 1,044.0 | 21.85 | 12,623 |
+| 16 | SGLang | 1.68 | 215 | 2,063.9 | 55.87 | 13,547 |
+| 64 | vLLM | 4.98 | 637 | 1,873.3 | 87.67 | 12,623 |
+| 64 | SGLang | 2.77 | 354 | 7,495.4 | 121.09 | 13,585 |
+
+GPU peak memory is close to the configured 85% budget for both engines because they reserve
+KV cache at startup, so it reflects the setting more than the model size.
+
+TensorRT-LLM is not in these tables yet: it runs from NVIDIA's container, which Colab cannot
+start. The suite runs it with `ENGINES=trtllm` inside that container on any NVIDIA machine.
 
 ## Run it
 
