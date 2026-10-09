@@ -1,4 +1,4 @@
-# LLM Serving Bench: vLLM vs SGLang vs TensorRT-LLM
+# LLM Serving Bench: vLLM vs SGLang, with TensorRT-LLM support
 
 A repeatable harness that measures LLM inference engines on identical hardware, with the
 same model, the same prompts and the same GPU memory budget. It reports what users feel
